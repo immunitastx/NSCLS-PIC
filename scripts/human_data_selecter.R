@@ -181,6 +181,10 @@ ImmunitasR::SendToBucket(local_file_path = "output/immunitas_output/metacell_sin
 #   as.data.frame() %>% filter(cell_type == "MigDC")
 
 ##############
+# NOW WE GET THE PIC-SEQ DATA
+#############
+
+##############
 
 lateral_genes = as.matrix(read.delim("annotations/lateral_genes.txt", stringsAsFactor=F, row.names=1))[,1]
 human_lateral = names(which(lateral_genes == "human_lateral"))
@@ -194,9 +198,52 @@ mle_features = union(mle_features, "CXCL13")
 
 ############
 
-mc = names(table(sin_cl@mc[cells]))
-mc = mc[ order(factor(color2name[ sin_cl@colors[ as.numeric(mc)]], levels = lin_ord))]
-patient = as.vector(sin_stats$patient); names(patient) = rownames(sin_stats)
-sample_dist = table(sin_cl@mc[cells], patient[cells])
-sample_dist = t(apply(sample_dist[mc,],1,sort,T))
-dist_n = sample_dist / rowSums(sample_dist)
+id_d = "human_PIC" 
+db_mat = scdb_mat(id_d)
+db_umis = read_large_umis(id_d)
+db_cells = db_mat@cells
+umis = cbind(sin_umis, db_umis[ rownames(sin_umis),])
+numis=800
+ds = .downsamp(umis, numis)
+comb = with(cell_stats, paste0(organ, "@", site, "@", patient)); names(comb) = rownames(cell_stats)
+X = table(comb[ cells], cells %in% t_cells)
+good_combs = names(which(rowSums(X < 20) == 0))
+good_cells = cells[ comb[cells] %in% good_combs]
+## Save time by reloading mle_res file
+mle_res_file <- "output/immunitas_output/mle_res.rds"
+if (!file.exists(mle_res_file)) {
+
+mle_res = run_pic_seq(id, id, ds, intersect(good_cells, t_cells), intersect(good_cells, dc_cells), lr_features, mle_features, paste0(outdir, "/alpha_estimation.png"),
+                      numis, comb = comb, reg = 1e-4)
+mle_res$well = rownames(mle_res)
+
+cell_stats = scdb_mat("all_human")@cell_metadata[ union(cells, db_cells),]
+mle_res$type = as.vector(cell_stats[rownames(mle_res), "PIC"])
+mle_res[ rownames(mle_res) %in% t_cells, "type"] = "T"
+mle_res[ rownames(mle_res) %in% dc_cells, "type"] = "DC"
+mle_res$sin_alpha = with(mle_res, ifelse(type == "PIC", 1 * (alpha >= 0.5), 1 * (well %in% t_cells)))
+mle_res$sin_ll = with(mle_res, pic_ll_to_pair(id, id, ds[,well], a_mc, b_mc, sin_alpha, reg = 1e-4, markers = mle_features))
+mle_res$diff = with(mle_res, ll - sin_ll)
+
+saveRDS(mle_res, mle_res_file)
+} else{
+  mle_res <- readRDS(mle_res_file)
+}
+
+#######
+bad_cells = names(sin_cl@mc)[ sin_cl@mc %in% bad_clusts]
+
+gate = as.vector(cell_stats$sorting.scheme); names(gate) = rownames(cell_stats)
+gate = c("T", "PIC", "APC")[ as.numeric(factor(gate))]; names(gate) = rownames(cell_stats)
+
+nk_pic = rownames(mle_res)[ color2name[ sin_cl@colors[ mle_res$b_mc]] %in% c("NK", "NK_CX3CR1")]
+good_pics = setdiff(rownames(mle_res)[ mle_res$type == "PIC" & mle_res$diff > 0 & mle_res$alpha > 0 & mle_res$alpha < 1], c(NA, nk_pic))
+
+alpha = mle_res[ good_pics, "alpha"]; names(alpha) = good_pics
+t_mc = mle_res[good_pics, "a_mc"]; names(t_mc) = good_pics
+dc_mc = mle_res[good_pics, "b_mc"]; names(dc_mc) = good_pics
+parser_t = color2name[ sin_cl@colors[ t_mc[ good_pics]]]; names(parser_t) = good_pics
+parser_dc = color2name[ sin_cl@colors[ dc_mc[ good_pics]]]; names(parser_dc) = good_pics
+
+sin_cells = setdiff(intersect(cells, names(gate)[ gate %in% c("APC", "T")]), 
+                    c(names(sin_names)[ sin_names %in% c("NK", "NK_CX3CR1", "Baso")], bad_cells))
