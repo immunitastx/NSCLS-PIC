@@ -16,6 +16,8 @@ require("parallel")
 library("compositions")
 require(glmnet)
 
+library(tidyverse)
+
 source("scripts/metacell_functions.r")
 source("scripts/pic_parser.r")
 
@@ -23,7 +25,7 @@ dir.create("saved_work")
 dir.create("figures")
 scdb_init("saved_work", force_reinit=T)
 
-pic_bucket <- pic_bucket
+pic_bucket <- "gs://immunitas_public_datasets/NSCLS_PIC_Cohen"
 
 ##################################
 # Import the entire count matrix
@@ -183,7 +185,10 @@ ImmunitasR::SendToBucket(local_file_path = "output/immunitas_output/metacell_sin
 ##############
 # NOW WE GET THE PIC-SEQ DATA
 #############
-
+outdir = paste0("figures/figure2")
+dir.create(outdir)
+supdir = paste0("figures/figureS2")
+dir.create(supdir)
 ##############
 
 lateral_genes = as.matrix(read.delim("annotations/lateral_genes.txt", stringsAsFactor=F, row.names=1))[,1]
@@ -247,3 +252,73 @@ parser_dc = color2name[ sin_cl@colors[ dc_mc[ good_pics]]]; names(parser_dc) = g
 
 sin_cells = setdiff(intersect(cells, names(gate)[ gate %in% c("APC", "T")]), 
                     c(names(sin_names)[ sin_names %in% c("NK", "NK_CX3CR1", "Baso")], bad_cells))
+
+parsed_pics_df <- cbind(parser_t, parser_dc) %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "pic_ids") %>%
+  rename(pic_tcell = parser_t, pic_myeloid = parser_dc)
+write_tsv(parsed_pics_df,file = "output/immunitas_output/parsed_pics_cell_types.tsv")
+ImmunitasR::SendToBucket(local_file_path = "output/immunitas_output/parsed_pics_cell_types.tsv",
+                         bucket_location = pic_bucket)
+
+##############
+
+t_col = "limegreen"; dc_col =  "firebrick3"; db_col = "orange2"
+cols = c(t_col, dc_col, db_col); names(cols) = c("T", "DC", "PIC")
+pdf(paste0(supdir, "/FigS2c.pdf"), useDingbats=F)
+plot(1,1,xlim = quantile(mle_res$diff, c(0,1), na.rm=T), ylim = c(0,1), type="n", axes=F, xlab="", ylab="")
+abline(v=0, lwd=3); grid(col="black")
+axis(1); axis(2)
+with(mle_res, sapply(names(cols), function(x) lines(ecdf(diff[type == x]), col = cols[x], lwd=4)))
+dev.off()
+
+all_pics = db_mat@cells
+patient_dist = table(cell_stats[ all_pics, "patient"], all_pics %in% good_pics)
+patient_dist = patient_dist[ rowSums(patient_dist) > 0,]
+rownames(patient_dist) = seq_len(nrow(patient_dist))
+dist_n = patient_dist / rowSums(patient_dist)
+ylim = c(0, max(dist_n[,2]) + 0.05)
+pdf(paste0(supdir, "/FigS2d.pdf"), useDingbats=F)
+X = barplot(dist_n[,2], ylim = ylim)
+text(X, dist_n[,2] + 0.02, patient_dist[,2])
+dev.off()
+
+##############
+
+cells = union(t_cells, dc_cells)
+t_nms = rev(read.table(paste0(supdir, "/FigS2f-h_bottom.txt"), stringsAsFactor=F)[[1]])
+dc_nms = rev(read.table(paste0(supdir, "/FigS2f-h_top.txt"), stringsAsFactor=F)[[1]])
+
+a_lfp = log2(scdb_mc(paste0(id, "_a"))@mc_fp)
+t_nms = t_nms[ order(max.col(a_lfp[t_nms, as.numeric(factor(intersect(clust_ord, t_clusts)))]))]
+
+b_lfp = log2(scdb_mc(paste0(id, "_b"))@mc_fp)
+dc_nms = dc_nms[ order(max.col(b_lfp[dc_nms, as.numeric(factor(intersect(clust_ord, dc_clusts)))]))]
+
+nms = union(t_nms, dc_nms)
+bad_cells = names(sin_cl@mc)[ sin_cl@mc %in% bad_clusts]
+
+all_pics = good_pics
+
+
+#### Fig 2b
+cell_ord = sample(good_pics[ order(factor(parser_t, levels = lin_ord))])
+disp_genes = rev(read.table( paste0(outdir, "/Fig2b.txt"), stringsAsFactor=F)[[1]])
+
+IM = log(1 + 7 * sweep(ds[disp_genes,cell_ord],2,alpha[cell_ord],"*"))
+vct = factor(parser_t, levels = lin_ord[1:11]); names(vct) = good_pics
+IM2 = log(1 + 7 * ds[disp_genes, sample(intersect(colnames(ds), t_cells))])
+vct2 = factor(sin_names[t_cells], levels = lin_ord[1:11]); names(vct) = good_pics
+grad = colorRampPalette(c("white", "orange", "tomato", "mediumorchid4", "midnightblue"))(1000)
+pdf(paste0(outdir, "/Fig2b.pdf"), useDingbats=F, height=5, width=10)
+par(fig = c(0,0.5,0.1,1), mar = c(0.5,5,0.5,0.5))
+image.2(IM2, col = grad, vct = vct2[colnames(IM2)], annotate="rows", zlim = c(0, max(c(IM, IM2)))); box(lwd=1)
+par(fig = c(0,0.5,0,0.1), new=T)
+image(matrix(seq_len(ncol(IM2))), axes=F, col = name2color[ sin_names[ colnames(IM2)[ order(vct2[ colnames(IM2)])]]]); box(lwd=1)
+par(fig = c(0.5,1,0.1,1), new=T) #, mar = rep(0.5,4))
+image.2(IM, col = grad, vct = vct[colnames(IM)], annotate="none", zlim = c(0, max(c(IM, IM2)))); box(lwd=1)
+par(fig = c(0.5,1,0,0.1), new=T)
+image(matrix(seq_len(ncol(IM))), axes=F, col = name2color[ parser_t[ colnames(IM)[ order(vct[ colnames(IM)])]]]); box(lwd=1)
+dev.off()
+
+#### Fig 2e
