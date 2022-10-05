@@ -25,6 +25,9 @@ get them working properly.
 This script processes the data as in the paper, creates several outputs
 files, and sends them to the cloud.
 
+_Cloud location_:
+
+
 ### File output
 #### Non-metacell information
 -   _output/immunitas_output/singlet_myeloid_pic.mtx_: A sparse matrix of
@@ -33,6 +36,10 @@ files, and sends them to the cloud.
     umi counts for singlets sorted on CD3+ cells
 -   _output/immunitas_output/doublet_cd3_myeloid_pic.mtx_: A sparse matrix
     of the umi counts for doublets sorted on CD3+ and myeloid markers
+-   _output/immunitas_output/metacell_annos_singlets.tsv_: A tsv with
+    annotations of which metacells do singlets fall into (and their cell type)
+-   _output/immunitas_output/parsed_pics_cell_types.tsv_: A tsv labeling the PIC
+    cells what their most likely myeloid and t-cell type are.
 #### Metacell information
 -   _output/immunitas_output/metacell_singlet_average_umi_exprs.tsv_:
     A tsv file of the average umi expression across singlets contained in a
@@ -40,7 +47,8 @@ files, and sends them to the cloud.
 -   _output/immunitas_output/metacell_singlet_proportion_umi_exprs.tsv_:
     A tsv file of the proportional umi expression across singlets contained in a
     metacell. From the sin_cl object in the @e_cov slot.
-
+-   _output/immuntias_output/metacell_annos_metacells.tsv_:
+    A tsv labeling the singlet metacells with their respective cell types.
 
 ## Original README below
 
